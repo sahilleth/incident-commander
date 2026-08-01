@@ -29,4 +29,4 @@ jobs:
           python -m build
 
       - name: Publish to PyPI
-        uses: pypi/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@release/v1
