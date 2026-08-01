@@ -58,7 +58,7 @@ class K8sWorker(BaseWorker):
             steps=steps,
         )
 
-        if self.settings.resolved_llm_api_key() and not pods:
+        if self.settings.llm_is_configured() and not pods:
             llm_result = await self.react.run_llm(
                 goal=f"Find unhealthy pods for {incident.service}",
                 tools=[

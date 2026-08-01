@@ -1,0 +1,32 @@
+# Scenario: OOMKilled — memory limit too low for allocation attempt.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-api
+  namespace: default
+  labels:
+    app: payment-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: payment-api
+  template:
+    metadata:
+      labels:
+        app: payment-api
+    spec:
+      containers:
+        - name: payment-api
+          image: alpine:3.19
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "ERROR: allocating large buffer for payment batch"
+              dd if=/dev/zero of=/dev/shm/balloon bs=1M count=64 2>/dev/null || true
+              sleep 3600
+          resources:
+            limits:
+              memory: 32Mi
+            requests:
+              memory: 16Mi

@@ -35,5 +35,8 @@ observability-forward:
 scenario-bad-deploy:
 	./scripts/scenario-bad-deploy.sh
 
+scenario-%:
+	./scripts/run-scenario.sh $*
+
 stop-observability:
 	./scripts/stop-observability.sh

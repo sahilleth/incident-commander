@@ -5,7 +5,7 @@ import logging
 from typing import Any
 
 from incident_commander.config import Settings
-from incident_commander.llm.groq_client import GroqClientPool
+from incident_commander.llm.llm_client import LLMClientPool
 from incident_commander.models.incident import (
     ActionRisk,
     Hypothesis,
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class HypothesisSynthesizer:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self._pool = GroqClientPool(settings)
+        self._pool = LLMClientPool(settings)
 
     async def synthesize(self, incident: Incident) -> list[Hypothesis]:
         if self._pool.has_client() and incident.timeline:

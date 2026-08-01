@@ -49,7 +49,7 @@ class LogsWorker(BaseWorker):
             steps=steps,
         )
 
-        if self.settings.resolved_llm_api_key() and not patterns:
+        if self.settings.llm_is_configured() and not patterns:
             llm_result = await self.react.run_llm(
                 goal=f"Find error signatures in logs for {incident.service}",
                 tools=[

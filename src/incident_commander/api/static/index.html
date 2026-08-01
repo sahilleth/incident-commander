@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Incident Commander</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2d3a4f;
+      --text: #e6edf3;
+      --muted: #8b9cb3;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --bad: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    header {
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--panel);
+    }
+    header h1 { margin: 0; font-size: 1.25rem; font-weight: 600; }
+    header span { color: var(--muted); font-size: 0.875rem; }
+    main {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      min-height: calc(100vh - 57px);
+    }
+    aside {
+      border-right: 1px solid var(--border);
+      padding: 1rem;
+      overflow-y: auto;
+    }
+    section { padding: 1.25rem 1.5rem; overflow-y: auto; }
+    h2 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 0.75rem; }
+    .incident-card {
+      display: block;
+      padding: 0.75rem;
+      margin-bottom: 0.5rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      cursor: pointer;
+      text-decoration: none;
+      color: inherit;
+    }
+    .incident-card:hover, .incident-card.active { border-color: var(--accent); }
+    .incident-card .id { font-weight: 600; font-size: 0.875rem; }
+    .incident-card .meta { font-size: 0.75rem; color: var(--muted); margin-top: 0.25rem; }
+    .badge {
+      display: inline-block;
+      padding: 0.125rem 0.5rem;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .badge-investigating { background: #1e3a5f; color: #93c5fd; }
+    .badge-resolved { background: #14532d; color: #86efac; }
+    .badge-escalated { background: #7f1d1d; color: #fca5a5; }
+    .badge-mitigating { background: #713f12; color: #fcd34d; }
+    .empty { color: var(--muted); font-size: 0.875rem; }
+    .summary-box {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1.25rem;
+    }
+    .timeline { list-style: none; padding: 0; margin: 0; }
+    .timeline li {
+      padding: 0.625rem 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.875rem;
+    }
+    .timeline li:last-child { border-bottom: none; }
+    .timeline .src { color: var(--accent); font-weight: 500; font-size: 0.75rem; }
+    .hypothesis {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 0.75rem;
+    }
+    .hypothesis h3 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+    .approval {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.75rem;
+      margin-bottom: 0.5rem;
+      background: #1c1917;
+      border: 1px solid #44403c;
+      border-radius: 8px;
+    }
+    button, .btn {
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      font-size: 0.875rem;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    button:hover { background: var(--accent-hover); }
+    button.secondary {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    button.secondary:hover { border-color: var(--muted); }
+    .actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
+    #toast {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      padding: 0.75rem 1rem;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.875rem;
+      opacity: 0;
+      transition: opacity 0.2s;
+      pointer-events: none;
+    }
+    #toast.show { opacity: 1; }
+    @media (max-width: 768px) {
+      main { grid-template-columns: 1fr; }
+      aside { border-right: none; border-bottom: 1px solid var(--border); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Incident Commander</h1>
+    <span>Live timeline · approve rollback</span>
+  </header>
+  <main>
+    <aside>
+      <h2>Incidents</h2>
+      <div id="incident-list" class="empty">Loading…</div>
+    </aside>
+    <section>
+      <div id="detail" class="empty">Select an incident</div>
+    </section>
+  </main>
+  <div id="toast"></div>
+  <script>
+    const API = window.location.origin;
+    let incidents = [];
+    let selectedId = null;
+
+    function toast(msg) {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.classList.add('show');
+      setTimeout(() => el.classList.remove('show'), 3000);
+    }
+
+    function badgeClass(status) {
+      return 'badge badge-' + (status || 'investigating');
+    }
+
+    async function loadIncidents() {
+      const res = await fetch(`${API}/incidents`);
+      incidents = await res.json();
+      const list = document.getElementById('incident-list');
+      if (!incidents.length) {
+        list.innerHTML = '<p class="empty">No incidents yet. Open one via CLI or Alertmanager webhook.</p>';
+        return;
+      }
+      list.innerHTML = incidents.map(i => `
+        <div class="incident-card ${i.incident_id === selectedId ? 'active' : ''}"
+             data-id="${i.incident_id}" onclick="selectIncident('${i.incident_id}')">
+          <div class="id">${i.incident_id}</div>
+          <div class="meta">${i.service} · ${i.namespace}</div>
+          <div class="meta"><span class="${badgeClass(i.status)}">${i.status}</span></div>
+        </div>
+      `).join('');
+    }
+
+    async function selectIncident(id) {
+      selectedId = id;
+      await loadIncidents();
+      const res = await fetch(`${API}/incidents/${id}`);
+      const i = await res.json();
+      const approvals = (i.approvals_pending || []).filter(a => a.status === 'pending');
+      const timeline = (i.timeline || []).map(e => `
+        <li><span class="src">${e.source}</span> · ${new Date(e.at).toLocaleString()}<br>${escapeHtml(e.event)}</li>
+      `).join('');
+      const hypotheses = (i.hypotheses || []).map(h => `
+        <div class="hypothesis">
+          <h3>${h.id} · ${Math.round(h.confidence * 100)}%</h3>
+          <p>${escapeHtml(h.description)}</p>
+        </div>
+      `).join('');
+      const approvalBlocks = approvals.map(a => `
+        <div class="approval">
+          <div><strong>${a.action.type}</strong><br><span class="meta">${escapeHtml(a.action.description)}</span></div>
+          <button onclick="approve('${i.incident_id}','${a.id}')">Approve</button>
+        </div>
+      `).join('');
+
+      document.getElementById('detail').innerHTML = `
+        <div class="summary-box">
+          <span class="${badgeClass(i.status)}">${i.status}</span>
+          <strong style="margin-left:0.5rem">${i.incident_id}</strong>
+          <p style="margin:0.75rem 0 0">${escapeHtml(i.summary || '')}</p>
+          <div class="meta" style="margin-top:0.5rem">${i.service} / ${i.namespace} · ${i.trigger}</div>
+        </div>
+        ${approvals.length ? `<h2>Pending approvals</h2>${approvalBlocks}` : ''}
+        ${hypotheses ? `<h2>Hypotheses</h2>${hypotheses}` : ''}
+        ${timeline ? `<h2>Timeline</h2><ul class="timeline">${timeline}</ul>` : ''}
+        <div class="actions">
+          <button class="secondary" onclick="selectIncident('${i.incident_id}')">Refresh</button>
+          <a class="btn secondary" href="${API}/incidents/${i.incident_id}/postmortem.md" target="_blank" style="text-decoration:none">Download postmortem</a>
+        </div>
+      `;
+    }
+
+    async function approve(incidentId, approvalId) {
+      const res = await fetch(`${API}/incidents/${incidentId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approval_id: approvalId }),
+      });
+      if (!res.ok) {
+        toast('Approval failed');
+        return;
+      }
+      toast('Approved — rollback running');
+      await selectIncident(incidentId);
+      await loadIncidents();
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    loadIncidents().then(() => {
+      if (incidents.length) selectIncident(incidents[0].incident_id);
+    });
+    setInterval(loadIncidents, 15000);
+  </script>
+</body>
+</html>

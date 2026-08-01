@@ -175,6 +175,36 @@ async def _record(incident_id: str, out: str) -> None:
     console.print(f"[green]Recorded eval fixture:[/green] {path}")
 
 
+@app.command("export")
+def export_incident(
+    incident_id: str,
+    output: str = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output file path (default: postmortems/<INC-ID>.md)",
+    ),
+) -> None:
+    """Export incident postmortem as Markdown."""
+    asyncio.run(_export(incident_id, output))
+
+
+async def _export(incident_id: str, output: str | None) -> None:
+    from pathlib import Path
+
+    from incident_commander.export.postmortem import write_postmortem_markdown
+
+    _, store = await _get_commander()
+    incident = await store.get(incident_id)
+    if incident is None:
+        console.print(f"[red]Incident {incident_id} not found[/red]")
+        raise typer.Exit(1)
+
+    out_path = Path(output or f"postmortems/{incident_id}.md")
+    path = write_postmortem_markdown(incident, out_path)
+    console.print(f"[green]Postmortem written:[/green] {path}")
+
+
 @app.command("doctor")
 def doctor() -> None:
     """Check kubectl, Prometheus, and Loki connectivity."""
@@ -228,13 +258,17 @@ async def _doctor() -> None:
     else:
         table.add_row("logs", "kubectl", f"LOG_BACKEND={settings.log_backend}")
 
-    if settings.resolved_llm_api_key():
-        key_detail = settings.resolved_llm_model()
+    if settings.llm_is_configured():
+        key_detail = f"{settings.llm_provider_label()} — {settings.resolved_llm_model()}"
         if settings.groq_api_key_fallback.strip():
-            key_detail += " (+ fallback key configured)"
-        table.add_row("groq", "configured", key_detail)
+            key_detail += " (+ Groq fallback key)"
+        table.add_row("llm", "configured", key_detail)
     else:
-        table.add_row("groq", "skipped", "No GROQ_API_KEY — using heuristic hypotheses")
+        table.add_row(
+            "llm",
+            "skipped",
+            "No LLM — set GROQ_API_KEY or LLM_PROVIDER=ollama + Ollama running",
+        )
 
     console.print(table)
 

@@ -12,6 +12,7 @@ All integrations are **live**: `kubectl`, Prometheus, Loki, and Groq (optional).
 ```bash
 pip install incident-commander
 incident-commander doctor
+incident-commander serve   # Web UI at http://localhost:8080/
 incident-commander open payment-api --namespace default
 ```
 
@@ -247,7 +248,8 @@ Outcome: **resolved** or **escalated**.
 | `incident-commander doctor` | Check kubectl, Prom, Loki, Groq |
 | `incident-commander eval` | Run built-in eval scenarios |
 | `incident-commander record <INC-ID>` | Export incident as eval fixture |
-| `incident-commander serve` | Start REST API on `:8080` |
+| `incident-commander export <INC-ID>` | Postmortem Markdown (`-o` file) |
+| `incident-commander serve` | REST API + Web UI at `http://localhost:8080/` |
 
 ### `open` options
 
@@ -275,12 +277,15 @@ incident-commander serve
 
 | Method | Path | Description |
 |--------|------|-------------|
+| `GET` | `/` , `/ui` | Web UI (timeline + approve) |
 | `GET` | `/health` | Health check |
 | `POST` | `/incidents` | Open + investigate |
 | `GET` | `/incidents` | List recent |
 | `GET` | `/incidents/{id}` | Get incident |
+| `GET` | `/incidents/{id}/postmortem.md` | Postmortem Markdown |
 | `POST` | `/incidents/{id}/investigate` | Re-run workers |
 | `POST` | `/incidents/{id}/approve` | Approve pending action |
+| `POST` | `/webhooks/alertmanager` | Alertmanager → auto-open incidents |
 
 **Open incident:**
 
@@ -303,7 +308,19 @@ curl -s -X POST http://localhost:8080/incidents/INC-.../approve \
   -d '{"approval_id": "APR-..."}'
 ```
 
-> The API has no authentication in v0.1.0. Do not expose it on untrusted networks.
+**Alertmanager webhook** (configure in Prometheus Alertmanager):
+
+```yaml
+receivers:
+  - name: incident-commander
+    webhook_configs:
+      - url: http://incident-commander:8080/webhooks/alertmanager
+        send_resolved: false
+```
+
+Labels `deployment`, `service`, or `app` on alerts map to the incident service name.
+
+> The API has no authentication in v0.2.0. Do not expose it on untrusted networks.
 
 ---
 
@@ -311,14 +328,25 @@ curl -s -X POST http://localhost:8080/incidents/INC-.../approve \
 
 Copy `.env.example` to `.env` or set environment variables.
 
-### LLM (Groq)
+### LLM (Groq or Ollama)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `LLM_PROVIDER` | `groq` | `groq`, `ollama`, or `openai` |
 | `GROQ_API_KEY` | — | Primary Groq API key ([console.groq.com](https://console.groq.com)) |
 | `GROQ_API_KEY_FALLBACK` | — | Second key; used when primary is rate-limited |
-| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Model name |
-| `LLM_BASE_URL` | `https://api.groq.com/openai/v1` | OpenAI-compatible endpoint |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq model name |
+| `OLLAMA_MODEL` | `llama3.2` | Ollama model when using local LLM |
+| `LLM_BASE_URL` | Groq URL | OpenAI-compatible base URL |
+
+**Ollama (no cloud API key):**
+
+```bash
+ollama pull llama3.2
+export LLM_PROVIDER=ollama
+export LLM_BASE_URL=http://localhost:11434
+incident-commander doctor
+```
 
 ### Kubernetes
 
@@ -433,6 +461,9 @@ tests/
 | `make setup-k8s` | Create kind cluster + payment-api |
 | `make setup-observability` | Prometheus + Loki on kind |
 | `make scenario-bad-deploy` | Live bad-deploy demo |
+| `make scenario-imagepull` | ImagePullBackOff scenario |
+| `make scenario-oom` | OOMKilled scenario |
+| `make scenario-crashloop-runtime` | Runtime crashloop (dependency errors) |
 | `make observability-forward` | Fallback port-forward if host ports missing |
 
 ---
@@ -447,10 +478,12 @@ tests/
 
 ## Roadmap
 
-- [ ] Post-incident postmortem export (Markdown)
-- [ ] Ollama / local LLM support (no API key for demos)
-- [ ] Alertmanager webhook trigger
-- [ ] Minimal web UI (timeline + approve)
+- [x] Ollama / local LLM
+- [x] Alertmanager webhook trigger
+- [x] Web UI (timeline + approve)
+- [x] Postmortem Markdown export
+- [x] Live scenarios (imagepull, OOM, crashloop-runtime)
+- [ ] Postmortem PDF export
 - [ ] Helm chart for in-cluster deployment
 - [ ] Additional runbooks (scale, restart)
 

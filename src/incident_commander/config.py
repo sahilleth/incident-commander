@@ -13,12 +13,14 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # LLM (Groq by default — OpenAI-compatible API)
+    # LLM — Groq (cloud) or Ollama / any OpenAI-compatible API
+    llm_provider: Literal["groq", "ollama", "openai"] = "groq"
     groq_api_key: str = ""
     groq_api_key_fallback: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
+    ollama_model: str = "llama3.2"
     llm_base_url: str = "https://api.groq.com/openai/v1"
-    llm_model: str = ""  # falls back to groq_model when empty
+    llm_model: str = ""  # overrides provider default when set
 
     incident_db_path: Path = Path("./data/incidents.db")
 
@@ -53,6 +55,21 @@ class Settings(BaseSettings):
 
     deploy_lookback_minutes: int = 60
 
+    def llm_uses_local_ollama(self) -> bool:
+        if self.llm_provider == "ollama":
+            return True
+        return "11434" in self.llm_base_url or "ollama" in self.llm_base_url.lower()
+
+    def llm_is_configured(self) -> bool:
+        return self.llm_uses_local_ollama() or bool(self.resolved_llm_api_keys())
+
+    def llm_provider_label(self) -> str:
+        if self.llm_uses_local_ollama():
+            return "ollama"
+        if self.resolved_llm_api_keys():
+            return "groq"
+        return "none"
+
     def resolved_llm_api_keys(self) -> list[str]:
         keys: list[str] = []
         for raw in (self.groq_api_key, self.groq_api_key_fallback):
@@ -66,7 +83,11 @@ class Settings(BaseSettings):
         return keys[0] if keys else ""
 
     def resolved_llm_model(self) -> str:
-        return self.llm_model.strip() or self.groq_model
+        if self.llm_model.strip():
+            return self.llm_model.strip()
+        if self.llm_uses_local_ollama():
+            return self.ollama_model
+        return self.groq_model
 
 
 def get_settings() -> Settings:

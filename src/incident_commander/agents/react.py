@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from incident_commander.config import Settings
-from incident_commander.llm.groq_client import GroqClientPool
+from incident_commander.llm.llm_client import LLMClientPool
 
 
 ToolHandler = Callable[[dict[str, Any]], Awaitable[Any]]
@@ -53,7 +53,7 @@ class ReActLoop:
     def __init__(self, settings: Settings, worker_name: str) -> None:
         self.settings = settings
         self.worker_name = worker_name
-        self._pool = GroqClientPool(settings)
+        self._pool = LLMClientPool(settings)
 
     async def run_deterministic(
         self,

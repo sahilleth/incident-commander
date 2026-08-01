@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "incident-commander"
-version = "0.1.0"
+version = "0.2.0"
 description = "Multi-agent AI incident commander for Kubernetes — correlates deploys, logs, metrics, and suggests rollback with human approval"
 readme = "README.md"
 license = "Apache-2.0"

@@ -1,0 +1,30 @@
+# Scenario: Runtime crashloop without a meaningful new deploy — dependency failure logs.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-api
+  namespace: default
+  labels:
+    app: payment-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: payment-api
+  template:
+    metadata:
+      labels:
+        app: payment-api
+    spec:
+      containers:
+        - name: payment-api
+          image: nginx:alpine
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "ERROR: Connection refused to payment-db.internal:5432"
+              echo "ERROR: downstream PaymentValidator timeout after 30s"
+              sleep 2
+              exit 1
+          ports:
+            - containerPort: 80

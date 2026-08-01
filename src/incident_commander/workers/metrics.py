@@ -48,7 +48,7 @@ class MetricsWorker(BaseWorker):
             steps=steps,
         )
 
-        if self.settings.resolved_llm_api_key() and snap is None:
+        if self.settings.llm_is_configured() and snap is None:
             llm_result = await self.react.run_llm(
                 goal=f"Get service metrics for {incident.service}",
                 tools=[

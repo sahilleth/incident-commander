@@ -63,7 +63,7 @@ class DeployCorrelatorWorker(BaseWorker):
             steps=steps,
         )
 
-        if self.settings.resolved_llm_api_key() and not deploys:
+        if self.settings.llm_is_configured() and not deploys:
             llm_result = await self.react.run_llm(
                 goal=f"Find deploy changes for {incident.service}",
                 tools=[
