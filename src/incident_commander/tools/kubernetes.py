@@ -183,3 +183,15 @@ class KubernetesClient(K8sClient):
             ["rollout", "undo", f"deployment/{service}", "-n", namespace]
         )
         return out.strip() or f"rollout undo deployment/{service} succeeded"
+
+    async def scale_deployment(self, service: str, namespace: str, replicas: int) -> str:
+        out = await self.kubectl.run(
+            [
+                "scale",
+                f"deployment/{service}",
+                f"--replicas={replicas}",
+                "-n",
+                namespace,
+            ]
+        )
+        return out.strip() or f"scaled deployment/{service} to {replicas} replicas"

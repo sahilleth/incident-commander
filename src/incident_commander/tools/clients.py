@@ -86,6 +86,10 @@ class K8sClient(ABC):
     async def rollout_undo(self, service: str, namespace: str) -> str:
         ...
 
+    @abstractmethod
+    async def scale_deployment(self, service: str, namespace: str, replicas: int) -> str:
+        ...
+
 
 class MetricsClient(ABC):
     @abstractmethod

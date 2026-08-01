@@ -67,6 +67,9 @@ class _FakeK8s(K8sClient):
     async def rollout_undo(self, service, namespace):
         return f"rollout undo deployment/{service} succeeded"
 
+    async def scale_deployment(self, service, namespace, replicas):
+        return f"scaled deployment/{service} to {replicas} replicas"
+
 
 class _FakeMetrics(MetricsClient):
     async def snapshot(self, service, since, namespace="default"):

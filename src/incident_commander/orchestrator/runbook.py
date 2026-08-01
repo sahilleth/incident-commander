@@ -14,9 +14,7 @@ class RunbookExecutor:
         if action_type == "rollback":
             return await self._rollback(incident, action)
         if action_type == "scale":
-            raise NotImplementedError(
-                "Scale actions are not implemented yet — use kubectl manually"
-            )
+            return await self._scale(incident, action)
         if action_type == "investigate":
             return "Investigation recorded; no automated action executed"
         if action_type == "escalate":
@@ -28,3 +26,11 @@ class RunbookExecutor:
         service = action.params.get("service", incident.service)
         namespace = action.params.get("namespace", incident.namespace)
         return await self.clients.k8s.rollout_undo(service, namespace)
+
+    async def _scale(self, incident: Incident, action: SuggestedAction) -> str:
+        service = action.params.get("service", incident.service)
+        namespace = action.params.get("namespace", incident.namespace)
+        replicas = action.params.get("replicas")
+        if replicas is None:
+            raise ValueError("scale action requires replicas in params")
+        return await self.clients.k8s.scale_deployment(service, namespace, int(replicas))

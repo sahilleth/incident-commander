@@ -10,6 +10,7 @@ from incident_commander.models.incident import (
     Incident,
     IncidentStatus,
     PendingApproval,
+    TimelineEvent,
     WorkerRun,
 )
 from incident_commander.orchestrator.runbook import RunbookExecutor
@@ -165,7 +166,7 @@ class IncidentCommander:
             "",
             "Timeline:",
         ]
-        for e in sorted(incident.timeline, key=lambda x: x.at):
+        for e in sorted(incident.timeline, key=self._timeline_sort_key):
             lines.append(f"  [{e.at.strftime('%H:%M:%S')}] {e.source}: {e.event}")
 
         if incident.hypotheses:
@@ -182,13 +183,21 @@ class IncidentCommander:
 
         return "\n".join(lines)
 
+    def _timeline_sort_key(self, event: TimelineEvent) -> datetime:
+        at = event.at
+        if at.tzinfo is None:
+            return at.replace(tzinfo=timezone.utc)
+        return at
+
     async def approve_action(self, incident_id: str, approval_id: str) -> Incident:
         incident = await self.store.get(incident_id)
         if incident is None:
             raise ValueError(f"Incident {incident_id} not found")
 
+        matched = False
         for approval in incident.approvals_pending:
             if approval.id == approval_id:
+                matched = True
                 approval.status = "approved"
                 incident.status = IncidentStatus.MITIGATING
                 incident.add_timeline_event(
@@ -245,6 +254,12 @@ class IncidentCommander:
                 ]
                 incident.summary = self._build_summary(incident)
                 break
+
+        if not matched:
+            raise ValueError(f"Approval {approval_id} not found or already processed")
+
+        if incident.status in (IncidentStatus.RESOLVED, IncidentStatus.ESCALATED):
+            incident.approvals_pending = []
 
         await self.store.save(incident)
         return incident

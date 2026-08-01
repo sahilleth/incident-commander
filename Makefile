@@ -1,4 +1,4 @@
-.PHONY: install test eval check doctor open setup-observability observability-forward scenario-bad-deploy stop-observability build publish
+.PHONY: install test eval check doctor open setup-observability observability-forward scenario-bad-deploy stop-observability build publish frontend-install frontend-dev frontend-build
 
 build:
 	python3 -m pip install --upgrade build -q
@@ -40,3 +40,15 @@ scenario-%:
 
 stop-observability:
 	./scripts/stop-observability.sh
+
+frontend-install:
+	cd frontendUI && bun install
+
+frontend-dev:
+	cd frontendUI && bun run dev
+
+frontend-build:
+	cd frontendUI && bun run build
+
+frontend-e2e:
+	./scripts/test-frontend-e2e.sh

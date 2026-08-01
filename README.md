@@ -5,14 +5,24 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 
-**Open-source AI incident commander for Kubernetes.** When something breaks, Incident Commander opens an investigation, runs parallel agent workers against live cluster data, ranks root-cause hypotheses, and queues safe actions (like rollback) for human approval—then verifies recovery.
+**Open-source AI incident commander for Kubernetes.** When something breaks, Incident Commander opens an investigation, runs parallel agent workers against live cluster data, ranks root-cause hypotheses, and queues safe actions (rollback, scale) for human approval—then verifies recovery.
 
-All integrations are **live**: `kubectl`, Prometheus, Loki, and Groq (optional). There is no mock mode.
+All integrations are **live**: `kubectl`, Prometheus, Loki, and Groq or Ollama (optional). There is no mock mode in the API or the React dashboard.
 
 ```bash
 pip install incident-commander
 incident-commander doctor
-incident-commander serve   # Web UI at http://localhost:8080/
+
+# Terminal 1 — API
+incident-commander serve
+
+# Terminal 2 — React dashboard (from a clone)
+make frontend-install frontend-dev   # http://localhost:3000
+```
+
+Or use the CLI only:
+
+```bash
 incident-commander open payment-api --namespace default
 ```
 
@@ -26,6 +36,7 @@ incident-commander open payment-api --namespace default
 - [How it works](#how-it-works)
 - [Quick start (pip)](#quick-start-pip)
 - [Full local demo (kind + observability)](#full-local-demo-kind--observability)
+- [Web UI](#web-ui)
 - [End-to-end incident flow](#end-to-end-incident-flow)
 - [CLI reference](#cli-reference)
 - [API reference](#api-reference)
@@ -53,7 +64,8 @@ Incident Commander fills the gap for homelab, small teams, and anyone who wants 
 
 - **Multi-agent ReAct workers** — deploy, logs, K8s state, and metrics in parallel
 - **Hypothesis synthesis** — Groq LLM or deterministic heuristics when no API key
-- **Human-in-the-loop rollback** — `kubectl rollout undo` only after approval
+- **Human-in-the-loop actions** — rollback (`kubectl rollout undo`) and scale only after approval
+- **React Web UI** — incident board, pending-approval queue, timeline, approve rollback/scale in the browser
 - **Post-mitigation verifier** — polls until healthy or escalates
 - **Eval harness** — score hypothesis quality on JSON fixtures
 
@@ -63,7 +75,7 @@ Incident Commander fills the gap for homelab, small teams, and anyone who wants 
 
 ```mermaid
 flowchart TD
-    T[Trigger: CLI or API] --> S[Supervisor]
+    T[Trigger: CLI, API, or Web UI] --> S[Supervisor]
     S --> W1[Deploy correlator]
     S --> W2[Logs worker]
     S --> W3[K8s worker]
@@ -86,8 +98,8 @@ flowchart TD
 1. **Trigger** — You open an incident for a Kubernetes **Deployment** name.
 2. **Workers** — Four agents gather evidence via ReAct loops (deterministic tools + optional LLM).
 3. **Synthesize** — Timeline is turned into ranked hypotheses with suggested actions.
-4. **Approve** — High-risk actions (rollback) require explicit approval.
-5. **Execute & verify** — Rollback runs, then pods/logs/metrics are polled until stable.
+4. **Approve** — High-risk actions (rollback, scale) require explicit approval.
+5. **Execute & verify** — Runbook runs, then pods/logs/metrics are polled until stable.
 
 **Service name = Deployment name.** Workers resolve pods and ReplicaSets from the deployment's label selector.
 
@@ -148,7 +160,7 @@ cp .env.example .env
 ./scripts/setup-k8s.sh
 ```
 
-Creates kind cluster `incident-commander`, wires **localhost:9090** (Prometheus) and **localhost:3100** (Loki), and deploys sample `payment-api`.
+Creates kind cluster `incident-commander` (kubectl context `kind-incident-commander`), wires **localhost:9090** (Prometheus) and **localhost:3100** (Loki), and deploys sample `payment-api`.
 
 If an old cluster lacks host ports:
 
@@ -189,11 +201,112 @@ make scenario-bad-deploy
 
 This applies a broken rollout (crashloop + error logs), runs a full investigation, prints hypotheses, and restores the healthy deployment.
 
+### 6. Start the API and Web UI
+
+```bash
+# Terminal 1 — API + SQLite persistence
+incident-commander serve
+# → http://localhost:8080 (OpenAPI docs at /docs)
+
+# Terminal 2 — React dashboard
+make frontend-install
+make frontend-dev
+# → http://localhost:3000
+```
+
+The Vite dev server proxies `/api` to the backend. Open the dashboard, browse incidents from your scenarios, and approve rollback or scale from the UI.
+
+### 7. Run more live scenarios
+
+```bash
+make scenario-imagepull
+make scenario-oom
+make scenario-crashloop-runtime
+```
+
+Each script applies a broken manifest, waits for failure signals, opens an investigation, and restores the healthy deployment on exit (unless `KEEP_BROKEN=1`).
+
+### 8. Smoke-test the UI API wiring
+
+```bash
+make frontend-e2e
+```
+
+Hits every REST endpoint the dashboard uses (health, list, get, postmortem, create, investigate, approve).
+
+---
+
+## Web UI
+
+The production dashboard lives in `frontendUI/` — a React app (TanStack Start, React Query, Tailwind, shadcn/ui) that talks to the FastAPI backend over REST. **No mock data**: every screen reads from `incident-commander serve`.
+
+### Run locally
+
+| Service | URL | Role |
+|---------|-----|------|
+| **React UI** (dev) | http://localhost:3000 | Dashboard — use this day-to-day |
+| **API** | http://localhost:8080 | REST + OpenAPI (`/docs`) |
+| **API via UI proxy** | http://localhost:3000/api | Same origin in dev (Vite proxy) |
+
+```bash
+incident-commander serve          # port 8080
+make frontend-install frontend-dev  # port 3000
+```
+
+Optional env in `frontendUI/.env` (see `frontendUI/.env.example`):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VITE_API_URL` | `/api` | API base URL for `fetch` |
+| `VITE_API_PROXY_TARGET` | `http://localhost:8080` | Backend target for Vite dev proxy |
+
+### What you can do in the UI
+
+| Feature | Description |
+|---------|-------------|
+| **Incident board** | All incidents from SQLite, filters by status/severity/namespace, auto-refresh while active |
+| **Awaiting approval** | Clickable sidebar panel listing every pending rollback/scale with links to the incident |
+| **Open incident** | Dispatch workers against a deployment (service name = Deployment name) |
+| **Incident detail** | Timeline, ranked hypotheses, worker runs, pending approvals |
+| **Approve rollback / scale** | Confirm destructive kubectl actions; verifier runs after approval (can take up to ~1 minute) |
+| **Re-investigate** | Re-run all workers on an open incident |
+| **Postmortem** | Download Markdown report |
+| **Export timeline** | Markdown, CSV, or JSON |
+| **Escalation alerts** | Sidebar toasts when SEV1, escalations, or new approvals appear |
+
+After you approve an action, the UI updates immediately and pauses auto-refresh until the API call completes so the pending-approval list does not flicker back.
+
+### Production build
+
+```bash
+make frontend-build
+incident-commander serve
+```
+
+If a static build exists under `frontendUI/dist/client/`, `frontendUI/dist/`, or `frontendUI/.output/public/`, `incident-commander serve` can serve it at `/` and `/ui` (legacy HTML fallback if none is found). For local development, prefer **:3000** with the API on **:8080**.
+
+More detail: [frontendUI/README.md](frontendUI/README.md).
+
 ---
 
 ## End-to-end incident flow
 
-### 1. Open and investigate
+You can run the full loop from the **Web UI** (http://localhost:3000) or the **CLI**. The steps are the same: open → review → approve → verify.
+
+### Via Web UI
+
+1. Open http://localhost:3000 (with `incident-commander serve` running on :8080).
+2. Click an incident on the board, or use **Open incident** for `payment-api` in `default`.
+3. Review the evidence timeline and ranked hypotheses.
+4. In **Pending approvals**, click **Approve rollback** (or scale), confirm in the dialog.
+5. Wait for kubectl + verifier (progress message shown; typically 15–60 seconds).
+6. Status becomes **resolved** or **escalated**; download postmortem or export timeline if needed.
+
+The **Awaiting approval** sidebar lists every pending action across incidents—click a row to jump straight to that incident.
+
+### Via CLI
+
+1. **Open and investigate**
 
 ```bash
 incident-commander open payment-api \
@@ -204,19 +317,19 @@ incident-commander open payment-api \
 
 Workers run in parallel. Output includes timeline, worker summaries, ranked hypotheses, and any **pending approvals**.
 
-### 2. Review
+2. **Review**
 
 ```bash
 incident-commander show INC-20260801-XXXXXX
 ```
 
-### 3. Approve rollback (if suggested)
+3. **Approve rollback or scale** (if suggested)
 
 ```bash
 incident-commander approve INC-20260801-XXXXXX APR-xxxxxxxx
 ```
 
-Runs `kubectl rollout undo`, then the **verifier** polls every `VERIFY_INTERVAL_SECONDS` (default 15s) until:
+Runs the approved runbook (`kubectl rollout undo` or `kubectl scale`), then the **verifier** polls every `VERIFY_INTERVAL_SECONDS` (default 15s) until:
 
 - Pods are healthy
 - Error logs quiet down
@@ -244,12 +357,12 @@ Outcome: **resolved** or **escalated**.
 | `incident-commander open <deployment>` | Open incident and run all workers |
 | `incident-commander list` | List recent incidents |
 | `incident-commander show <INC-ID>` | Full incident detail |
-| `incident-commander approve <INC-ID> <APR-ID>` | Approve action (e.g. rollback) |
+| `incident-commander approve <INC-ID> <APR-ID>` | Approve rollback or scale |
 | `incident-commander doctor` | Check kubectl, Prom, Loki, Groq |
 | `incident-commander eval` | Run built-in eval scenarios |
 | `incident-commander record <INC-ID>` | Export incident as eval fixture |
 | `incident-commander export <INC-ID>` | Postmortem Markdown (`-o` file) |
-| `incident-commander serve` | REST API + Web UI at `http://localhost:8080/` |
+| `incident-commander serve` | REST API on `http://localhost:8080` |
 
 ### `open` options
 
@@ -277,20 +390,22 @@ incident-commander serve
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/` , `/ui` | Web UI (timeline + approve) |
-| `GET` | `/health` | Health check |
-| `POST` | `/incidents` | Open + investigate |
-| `GET` | `/incidents` | List recent |
-| `GET` | `/incidents/{id}` | Get incident |
-| `GET` | `/incidents/{id}/postmortem.md` | Postmortem Markdown |
-| `POST` | `/incidents/{id}/investigate` | Re-run workers |
-| `POST` | `/incidents/{id}/approve` | Approve pending action |
+| `GET` | `/` , `/ui` | Web UI (built React app, or legacy HTML fallback) |
+| `GET` | `/api/health` | Health check (also at `/health`) |
+| `POST` | `/api/incidents` | Open + investigate (also at `/incidents`) |
+| `GET` | `/api/incidents` | List recent |
+| `GET` | `/api/incidents/{id}` | Get incident |
+| `GET` | `/api/incidents/{id}/postmortem.md` | Postmortem Markdown |
+| `POST` | `/api/incidents/{id}/investigate` | Re-run workers |
+| `POST` | `/api/incidents/{id}/approve` | Approve pending action |
 | `POST` | `/webhooks/alertmanager` | Alertmanager → auto-open incidents |
+
+Legacy root paths (`/health`, `/incidents`, …) remain for backward compatibility.
 
 **Open incident:**
 
 ```bash
-curl -s -X POST http://localhost:8080/incidents \
+curl -s -X POST http://localhost:8080/api/incidents \
   -H 'Content-Type: application/json' \
   -d '{
     "service": "payment-api",
@@ -300,10 +415,10 @@ curl -s -X POST http://localhost:8080/incidents \
   }'
 ```
 
-**Approve rollback:**
+**Approve rollback or scale:**
 
 ```bash
-curl -s -X POST http://localhost:8080/incidents/INC-.../approve \
+curl -s -X POST http://localhost:8080/api/incidents/INC-.../approve \
   -H 'Content-Type: application/json' \
   -d '{"approval_id": "APR-..."}'
 ```
@@ -430,10 +545,14 @@ Fixture source files: `src/incident_commander/eval/fixtures/`.
 ## Development
 
 ```bash
-make install          # editable install with dev deps
+make install          # editable Python install with dev deps
 make test             # pytest
 make eval             # eval scenarios
 make check            # compile + test + eval (CI runs this)
+make frontend-install # bun install in frontendUI/
+make frontend-dev     # React UI on :3000 (API must be on :8080)
+make frontend-build   # production bundle
+make frontend-e2e     # smoke-test UI API endpoints
 make scenario-bad-deploy   # live kind scenario
 make build            # wheel for PyPI
 ```
@@ -445,12 +564,13 @@ src/incident_commander/
   agents/          # ReAct loop engine
   workers/         # Deploy, logs, k8s, metrics
   orchestrator/    # Commander, runbook, verifier
-  llm/             # Groq client + synthesizer
+  llm/             # Groq / Ollama client + synthesizer
   tools/           # kubectl, Prometheus, Loki clients
   eval/            # Replay runner + fixtures
-  api/             # FastAPI app
+  api/             # FastAPI app + legacy static HTML
+frontendUI/        # React dashboard (TanStack Start)
 k8s/               # kind config, monitoring, sample apps, scenarios
-scripts/           # setup-k8s, observability, scenarios
+scripts/           # setup-k8s, observability, scenarios, frontend-e2e
 tests/
 ```
 
@@ -464,6 +584,10 @@ tests/
 | `make scenario-imagepull` | ImagePullBackOff scenario |
 | `make scenario-oom` | OOMKilled scenario |
 | `make scenario-crashloop-runtime` | Runtime crashloop (dependency errors) |
+| `make frontend-install` | Install frontendUI dependencies (Bun) |
+| `make frontend-dev` | Vite dev server on :3000 |
+| `make frontend-build` | Build React app to `frontendUI/dist/` |
+| `make frontend-e2e` | Smoke-test REST endpoints used by the UI |
 | `make observability-forward` | Fallback port-forward if host ports missing |
 
 ---
@@ -480,12 +604,13 @@ tests/
 
 - [x] Ollama / local LLM
 - [x] Alertmanager webhook trigger
-- [x] Web UI (timeline + approve)
+- [x] React Web UI (board, timeline, approve rollback/scale, pending-approval queue)
 - [x] Postmortem Markdown export
 - [x] Live scenarios (imagepull, OOM, crashloop-runtime)
+- [x] Scale runbook (`kubectl scale`)
 - [ ] Postmortem PDF export
 - [ ] Helm chart for in-cluster deployment
-- [ ] Additional runbooks (scale, restart)
+- [ ] API authentication
 
 ---
 

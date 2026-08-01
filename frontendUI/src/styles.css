@@ -1,0 +1,141 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Incident Commander design system — single dark DevOps theme
+ * (slate/charcoal surfaces, cyan command accent, semantic status colors).
+ */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 3px);
+  --radius-md: calc(var(--radius) - 1px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+
+  --color-status-open: var(--status-open);
+  --color-status-investigating: var(--status-investigating);
+  --color-status-mitigating: var(--status-mitigating);
+  --color-status-resolved: var(--status-resolved);
+  --color-status-escalated: var(--status-escalated);
+
+  --color-sev1: var(--sev1);
+  --color-sev2: var(--sev2);
+  --color-sev3: var(--sev3);
+  --color-sev4: var(--sev4);
+
+  --color-src-deploy: var(--src-deploy);
+  --color-src-logs: var(--src-logs);
+  --color-src-k8s: var(--src-k8s);
+  --color-src-metrics: var(--src-metrics);
+  --color-src-commander: var(--src-commander);
+  --color-src-human: var(--src-human);
+
+  --font-sans: "Inter Tight", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+:root {
+  --radius: 0.5rem;
+
+  --background: oklch(0.176 0.014 258);
+  --foreground: oklch(0.949 0.008 250);
+  --surface: oklch(0.213 0.015 258);
+  --surface-raised: oklch(0.253 0.017 258);
+  --card: oklch(0.213 0.015 258);
+  --card-foreground: oklch(0.949 0.008 250);
+  --popover: oklch(0.229 0.016 258);
+  --popover-foreground: oklch(0.949 0.008 250);
+  --primary: oklch(0.762 0.124 205);
+  --primary-foreground: oklch(0.18 0.02 240);
+  --secondary: oklch(0.276 0.017 258);
+  --secondary-foreground: oklch(0.92 0.008 250);
+  --muted: oklch(0.263 0.016 258);
+  --muted-foreground: oklch(0.665 0.021 254);
+  --accent: oklch(0.3 0.02 255);
+  --accent-foreground: oklch(0.95 0.008 250);
+  --destructive: oklch(0.596 0.212 22);
+  --destructive-foreground: oklch(0.98 0.005 250);
+  --border: oklch(0.297 0.017 258);
+  --input: oklch(0.286 0.017 258);
+  --ring: oklch(0.762 0.124 205);
+
+  --status-open: oklch(0.72 0.02 255);
+  --status-investigating: oklch(0.68 0.155 245);
+  --status-mitigating: oklch(0.79 0.145 76);
+  --status-resolved: oklch(0.73 0.16 156);
+  --status-escalated: oklch(0.66 0.205 22);
+
+  --sev1: oklch(0.66 0.205 22);
+  --sev2: oklch(0.78 0.15 60);
+  --sev3: oklch(0.78 0.13 96);
+  --sev4: oklch(0.7 0.02 255);
+
+  --src-deploy: oklch(0.72 0.16 300);
+  --src-logs: oklch(0.79 0.145 76);
+  --src-k8s: oklch(0.68 0.155 245);
+  --src-metrics: oklch(0.73 0.16 156);
+  --src-commander: oklch(0.762 0.124 205);
+  --src-human: oklch(0.72 0.02 255);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+@utility grid-backdrop {
+  background-image:
+    linear-gradient(to right, color-mix(in oklab, var(--border) 55%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklab, var(--border) 55%, transparent) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+@utility pulse-dot {
+  box-shadow: 0 0 0 0 currentColor;
+  animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, currentColor 60%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
