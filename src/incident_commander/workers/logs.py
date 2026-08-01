@@ -1,7 +1,7 @@
 """Logs and error pattern worker with ReAct loop."""
 
 from incident_commander.agents.react import DeterministicStep, ReActTool
-from incident_commander.models.incident import TimelineEvent
+from incident_commander.models.incident import TimelineEvent, WorkerResult
 from incident_commander.workers.base import BaseWorker
 
 
