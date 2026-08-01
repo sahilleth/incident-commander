@@ -1,0 +1,32 @@
+{
+  "id": "crashloop_no_deploy",
+  "description": "Runtime errors without recent deploy",
+  "service": "payment-api",
+  "namespace": "default",
+  "trigger": "eval:crashloop",
+  "mode": "synthesizer",
+  "timeline": [
+    {
+      "id": "e-log",
+      "at": "2026-08-01T12:00:00+00:00",
+      "source": "logs_worker",
+      "event": "ERROR: connection refused to database",
+      "confidence": "high",
+      "metadata": {}
+    },
+    {
+      "id": "e-k8s",
+      "at": "2026-08-01T12:00:00+00:00",
+      "source": "k8s_worker",
+      "event": "Pod default/payment-api-abc: CrashLoopBackOff, restarts=5",
+      "confidence": "high",
+      "metadata": {}
+    }
+  ],
+  "expectation": {
+    "top_hypothesis_contains": ["runtime", "error", "crash", "dependency", "config"],
+    "min_contains_matches": 1,
+    "min_confidence": 0.3,
+    "should_request_rollback": false
+  }
+}

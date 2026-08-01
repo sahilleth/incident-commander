@@ -1,0 +1,13 @@
+# kind cluster with host ports for Prometheus (9090) and Loki (3100).
+# containerPort must match Kubernetes NodePort on monitoring services.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30090
+        hostPort: 9090
+        listenAddress: 127.0.0.1
+      - containerPort: 30310
+        hostPort: 3100
+        listenAddress: 127.0.0.1

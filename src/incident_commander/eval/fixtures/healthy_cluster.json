@@ -1,0 +1,15 @@
+{
+  "id": "healthy_cluster",
+  "description": "No signals — should not claim high-confidence bad deploy",
+  "service": "payment-api",
+  "namespace": "default",
+  "trigger": "eval:healthy",
+  "mode": "synthesizer",
+  "timeline": [],
+  "expectation": {
+    "top_hypothesis_contains": ["insufficient", "unclear", "signals"],
+    "min_contains_matches": 1,
+    "min_confidence": 0.0,
+    "should_request_rollback": false
+  }
+}

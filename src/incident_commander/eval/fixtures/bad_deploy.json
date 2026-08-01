@@ -1,0 +1,47 @@
+{
+  "id": "bad_deploy",
+  "description": "Deploy revision 42 correlates with NPE and crashloop",
+  "service": "payment-api",
+  "namespace": "default",
+  "trigger": "eval:bad-deploy",
+  "mode": "synthesizer",
+  "timeline": [
+    {
+      "id": "e-deploy",
+      "at": "2026-08-01T12:00:00+00:00",
+      "source": "deploy_correlator",
+      "event": "Deployment payment-api rolled out revision 42",
+      "confidence": "high",
+      "metadata": {"revision": "42"}
+    },
+    {
+      "id": "e-log",
+      "at": "2026-08-01T12:01:00+00:00",
+      "source": "logs_worker",
+      "event": "ERROR: NullPointerException in PaymentValidator.validate()",
+      "confidence": "high",
+      "metadata": {"count": 500}
+    },
+    {
+      "id": "e-k8s",
+      "at": "2026-08-01T12:01:00+00:00",
+      "source": "k8s_worker",
+      "event": "Pod default/payment-api-abc: CrashLoopBackOff, restarts=3, rev=42",
+      "confidence": "high",
+      "metadata": {"restarts": 3}
+    },
+    {
+      "id": "e-metrics",
+      "at": "2026-08-01T12:01:00+00:00",
+      "source": "metrics_worker",
+      "event": "Error rate 8.4% (baseline 0.4%), P99 1240ms, RPS 3200",
+      "confidence": "high",
+      "metadata": {"error_rate_pct": 8.4}
+    }
+  ],
+  "expectation": {
+    "top_hypothesis_contains": ["deploy", "revision"],
+    "min_confidence": 0.5,
+    "should_request_rollback": true
+  }
+}
