@@ -9,6 +9,8 @@
 
 All integrations are **live**: `kubectl`, Prometheus, Loki, and Groq or Ollama (optional). There is no mock mode in the API or the React dashboard.
 
+![Incident Commander dashboard — incident board, awaiting approval queue, and escalation alerts](docs/dashboard.png)
+
 ```bash
 pip install incident-commander
 incident-commander doctor
