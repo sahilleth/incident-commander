@@ -2,10 +2,12 @@
 
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from incident_commander.config import Settings
 from incident_commander.llm.llm_client import LLMClientPool
+from incident_commander.llm.usage import LLMUsageAccumulator
 from incident_commander.models.incident import (
     ActionRisk,
     Hypothesis,
@@ -15,11 +17,82 @@ from incident_commander.models.incident import (
 
 logger = logging.getLogger(__name__)
 
+_SUBMIT_HYPOTHESES_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "submit_hypotheses",
+        "description": "Submit ranked root-cause hypotheses for the incident.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "hypotheses": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "description": {"type": "string"},
+                            "confidence": {"type": "number"},
+                            "suggested_actions": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "type": {"type": "string"},
+                                        "description": {"type": "string"},
+                                        "risk": {"type": "string"},
+                                        "requires_approval": {"type": "boolean"},
+                                        "params": {"type": "object"},
+                                    },
+                                },
+                            },
+                        },
+                        "required": ["description", "confidence"],
+                    },
+                },
+            },
+            "required": ["hypotheses"],
+        },
+    },
+}
+
+_CRITIQUE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "submit_critique",
+        "description": "Critique whether timeline evidence supports the hypothesis.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "supported": {"type": "boolean"},
+                "reasoning": {"type": "string"},
+                "confidence_adjustment": {
+                    "type": "number",
+                    "description": "Negative adjustment only, e.g. -0.3",
+                },
+            },
+            "required": ["supported", "reasoning", "confidence_adjustment"],
+        },
+    },
+}
+
+
+@dataclass
+class CritiqueResult:
+    supported: bool
+    reasoning: str
+    confidence_adjustment: float
+
 
 class HypothesisSynthesizer:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        usage_accumulator: LLMUsageAccumulator | None = None,
+    ) -> None:
         self.settings = settings
-        self._pool = LLMClientPool(settings)
+        self._usage = usage_accumulator
+        self._pool = LLMClientPool(settings, usage_accumulator=usage_accumulator)
 
     async def synthesize(self, incident: Incident) -> list[Hypothesis]:
         if self._pool.has_client() and incident.timeline:
@@ -28,6 +101,60 @@ class HypothesisSynthesizer:
             except Exception as exc:
                 logger.warning("LLM synthesis failed, using heuristic: %s", exc)
         return self._synthesize_heuristic(incident)
+
+    async def critique(
+        self, incident: Incident, hypothesis: Hypothesis
+    ) -> CritiqueResult | None:
+        if not self._pool.has_client():
+            return None
+
+        evidence = [
+            e for e in incident.timeline if e.id in hypothesis.evidence_event_ids
+        ]
+        if not evidence:
+            evidence = incident.timeline[:5]
+
+        evidence_text = "\n".join(
+            f"- [{e.at.isoformat()}] ({e.source}) {e.event}" for e in evidence
+        )
+        prompt = f"""Critique this top hypothesis against cited timeline evidence.
+
+Hypothesis ({hypothesis.confidence:.0%} confidence): {hypothesis.description}
+
+Evidence events:
+{evidence_text}
+
+Does the evidence actually support this conclusion? Is there a more likely alternative?
+confidence_adjustment must be <= 0 (never inflate confidence).
+"""
+
+        try:
+            response = await self._pool.chat_completion(
+                model=self.settings.resolved_llm_model(),
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                tools=[_CRITIQUE_TOOL],
+                tool_choice={
+                    "type": "function",
+                    "function": {"name": "submit_critique"},
+                },
+            )
+            message = response.choices[0].message
+            tool_calls = getattr(message, "tool_calls", None) or []
+            if not tool_calls:
+                return None
+            data = json.loads(tool_calls[0].function.arguments or "{}")
+            adjustment = float(data.get("confidence_adjustment", 0.0))
+            if adjustment > 0:
+                adjustment = 0.0
+            return CritiqueResult(
+                supported=bool(data.get("supported", False)),
+                reasoning=str(data.get("reasoning", "")),
+                confidence_adjustment=adjustment,
+            )
+        except Exception as exc:
+            logger.warning("Hypothesis critique failed, skipping: %s", exc)
+            return None
 
     async def _synthesize_llm(self, incident: Incident) -> list[Hypothesis]:
         timeline_text = "\n".join(
@@ -44,39 +171,27 @@ Trigger: {incident.trigger}
 Timeline:
 {timeline_text}
 
-Respond with JSON only:
-{{
-  "hypotheses": [
-    {{
-      "id": "H1",
-      "description": "...",
-      "confidence": 0.85,
-      "suggested_actions": [
-        {{
-          "type": "rollback",
-          "description": "...",
-          "risk": "medium",
-          "requires_approval": true,
-          "params": {{"service": "{incident.service}", "namespace": "{incident.namespace}"}}
-        }}
-      ]
-    }}
-  ]
-}}
-
 Rules:
 - Only suggest rollback if timeline shows errors, crash loops, or clear metric degradation alongside a deploy.
 - If signals are weak or cluster looks healthy, use investigate/escalate instead of rollback.
 - Confidence must reflect evidence strength in the timeline.
+- Call submit_hypotheses with your ranked hypotheses.
 """
         response = await self._pool.chat_completion(
             model=self.settings.resolved_llm_model(),
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2,
-            response_format={"type": "json_object"},
+            tools=[_SUBMIT_HYPOTHESES_TOOL],
+            tool_choice={
+                "type": "function",
+                "function": {"name": "submit_hypotheses"},
+            },
         )
-        content = response.choices[0].message.content or "{}"
-        data = json.loads(content)
+        message = response.choices[0].message
+        tool_calls = getattr(message, "tool_calls", None) or []
+        if not tool_calls:
+            raise ValueError("LLM did not return submit_hypotheses tool call")
+        data = json.loads(tool_calls[0].function.arguments or "{}")
         return self._parse_hypotheses(data, incident)
 
     def _synthesize_heuristic(self, incident: Incident) -> list[Hypothesis]:

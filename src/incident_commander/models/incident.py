@@ -46,6 +46,22 @@ class Hypothesis(BaseModel):
     suggested_actions: list[SuggestedAction] = Field(default_factory=list)
 
 
+class ReActStep(BaseModel):
+    iteration: int
+    thought: str = ""
+    action: str | None = None
+    action_input: dict[str, Any] = Field(default_factory=dict)
+    observation: str = ""
+
+
+class LLMUsage(BaseModel):
+    calls: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+
+
 class WorkerRun(BaseModel):
     worker: str
     status: Literal["pending", "running", "complete", "failed", "timeout"] = "pending"
@@ -55,6 +71,7 @@ class WorkerRun(BaseModel):
     error: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    steps: list[ReActStep] = Field(default_factory=list)
 
 
 class PendingApproval(BaseModel):
@@ -83,6 +100,7 @@ class Incident(BaseModel):
     human_lead: str | None = None
     resolved_at: datetime | None = None
     summary: str = ""
+    llm_usage: LLMUsage = Field(default_factory=LLMUsage)
 
     def add_timeline_event(
         self,
@@ -112,3 +130,4 @@ class WorkerResult(BaseModel):
     tools_called: list[str] = Field(default_factory=list)
     iterations: int = 0
     error: str | None = None
+    steps: list[ReActStep] = Field(default_factory=list)

@@ -32,7 +32,10 @@ class FakeDeployClient(DeployClient):
 
 
 class FakeLogsClient(LogsClient):
+    last_since: datetime | None = None
+
     async def top_error_patterns(self, service, since, namespace, limit=5):
+        FakeLogsClient.last_since = since
         since = since if since.tzinfo else since.replace(tzinfo=timezone.utc)
         return [
             LogPattern(

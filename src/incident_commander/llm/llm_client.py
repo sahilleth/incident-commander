@@ -6,6 +6,7 @@ from typing import Any
 from openai import APIStatusError, AsyncOpenAI
 
 from incident_commander.config import Settings
+from incident_commander.llm.usage import LLMUsageAccumulator
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +42,13 @@ def _normalize_openai_base_url(url: str) -> str:
 class LLMClientPool:
     """Chat completions via Groq, Ollama, or any OpenAI-compatible API."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        usage_accumulator: LLMUsageAccumulator | None = None,
+    ) -> None:
         self.settings = settings
+        self._usage = usage_accumulator
         self._clients: list[AsyncOpenAI] = []
         self._active_index = 0
 
@@ -75,6 +81,7 @@ class LLMClientPool:
 
         allow_failover = not self.settings.llm_uses_local_ollama()
         last_exc: Exception | None = None
+        model = str(kwargs.get("model", self.settings.resolved_llm_model()))
 
         for attempt in range(len(self._clients)):
             idx = (self._active_index + attempt) % len(self._clients)
@@ -84,6 +91,7 @@ class LLMClientPool:
                 self._active_index = idx
                 if attempt > 0:
                     logger.info("LLM request succeeded with fallback API key #%d", idx + 1)
+                self._record_usage(model, result)
                 return result
             except Exception as exc:
                 last_exc = exc
@@ -103,6 +111,16 @@ class LLMClientPool:
         if last_exc is not None:
             raise last_exc
         raise RuntimeError("No LLM configured")
+
+    def _record_usage(self, model: str, result: Any) -> None:
+        if self._usage is None:
+            return
+        usage = getattr(result, "usage", None)
+        if usage is None:
+            return
+        prompt = int(getattr(usage, "prompt_tokens", 0) or 0)
+        completion = int(getattr(usage, "completion_tokens", 0) or 0)
+        self._usage.record(model, prompt, completion)
 
 
 GroqClientPool = LLMClientPool

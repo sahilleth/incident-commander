@@ -1,19 +1,26 @@
 """Logs and error pattern worker with ReAct loop."""
 
+from datetime import timedelta
+from typing import Any
+
 from incident_commander.agents.react import DeterministicStep, ReActTool
-from incident_commander.models.incident import TimelineEvent, WorkerResult
+from incident_commander.models.incident import Incident, TimelineEvent, WorkerResult
 from incident_commander.workers.base import BaseWorker
 
 
 class LogsWorker(BaseWorker):
     name = "logs_worker"
 
-    async def run(self, incident) -> WorkerResult:
+    async def run(
+        self, incident: Incident, context: dict[str, Any] | None = None
+    ) -> WorkerResult:
+        context = context or {}
         patterns: list = []
         since_incident = self._since(incident)
         since_expanded = self._since(
             incident, extra_minutes=self.settings.deploy_lookback_minutes
         )
+        deploy_at = context.get("deploy_at")
 
         async def fetch_recent() -> int:
             nonlocal patterns
@@ -29,20 +36,49 @@ class LogsWorker(BaseWorker):
             )
             return len(patterns)
 
-        steps = [
-            DeterministicStep(
-                thought="Search error patterns since incident opened",
-                action_name="logs.top_error_patterns",
-                run=fetch_recent,
-                stop_if=lambda n: n > 0,
-            ),
-            DeterministicStep(
-                thought="Expand log window and search again",
-                action_name="logs.top_error_patterns_expanded",
-                run=fetch_expanded,
-                stop_if=lambda n: n > 0,
-            ),
-        ]
+        async def fetch_around_deploy() -> int:
+            nonlocal patterns
+            if deploy_at is None:
+                return 0
+            anchor = deploy_at
+            if anchor.tzinfo is None:
+                from datetime import timezone
+
+                anchor = anchor.replace(tzinfo=timezone.utc)
+            since = anchor - timedelta(minutes=2)
+            patterns = await self.clients.logs.top_error_patterns(
+                incident.service, since, incident.namespace
+            )
+            return len(patterns)
+
+        steps: list[DeterministicStep] = []
+
+        if deploy_at is not None:
+            steps.append(
+                DeterministicStep(
+                    thought="Search error patterns in tight window around deploy timestamp",
+                    action_name="logs.top_error_patterns_around_deploy",
+                    run=fetch_around_deploy,
+                    stop_if=lambda n: n > 0,
+                )
+            )
+
+        steps.extend(
+            [
+                DeterministicStep(
+                    thought="Search error patterns since incident opened",
+                    action_name="logs.top_error_patterns",
+                    run=fetch_recent,
+                    stop_if=lambda n: n > 0,
+                ),
+                DeterministicStep(
+                    thought="Expand log window and search again",
+                    action_name="logs.top_error_patterns_expanded",
+                    run=fetch_expanded,
+                    stop_if=lambda n: n > 0,
+                ),
+            ]
+        )
 
         react_result = await self.react.run_deterministic(
             goal=f"Find top error log patterns for {incident.service}",
@@ -63,11 +99,13 @@ class LogsWorker(BaseWorker):
                 context={
                     "service": incident.service,
                     "namespace": incident.namespace,
+                    "deploy_at": deploy_at.isoformat() if deploy_at else None,
                 },
                 max_iterations=3,
             )
             react_result.tools_called.extend(llm_result.tools_called)
             react_result.iterations += llm_result.iterations
+            react_result.steps.extend(llm_result.steps)
             if llm_result.summary:
                 react_result.summary = llm_result.summary
 

@@ -2,15 +2,19 @@
 
 import asyncio
 
+from typing import Any
+
 from incident_commander.agents.react import DeterministicStep, ReActTool
-from incident_commander.models.incident import TimelineEvent, WorkerResult
+from incident_commander.models.incident import Incident, TimelineEvent, WorkerResult
 from incident_commander.workers.base import BaseWorker
 
 
 class MetricsWorker(BaseWorker):
     name = "metrics_worker"
 
-    async def run(self, incident) -> WorkerResult:
+    async def run(
+        self, incident: Incident, context: dict[str, Any] | None = None
+    ) -> WorkerResult:
         snap = None
         since = self._since(incident)
 

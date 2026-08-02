@@ -7,6 +7,7 @@ import { RefreshControl } from "./RefreshControl";
 import { TimelineExportButton } from "./TimelineExportButton";
 import { useAutoRefresh } from "@/hooks/use-auto-refresh";
 import { ApprovalCard } from "./ApprovalCard";
+import { AgentReasoningPanel } from "./AgentReasoningPanel";
 import { HypothesisCard } from "./HypothesisCard";
 import { Timeline } from "./Timeline";
 import { SeverityBadge, StatusBadge, sourceMeta } from "./StatusBadge";
@@ -178,6 +179,12 @@ export function IncidentDetail({ incidentId }: IncidentDetailProps) {
             <SeverityBadge severity={incident.severity} />
             <StatusBadge status={incident.status} />
           </div>
+          {incident.llm_usage ? (
+            <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+              ${incident.llm_usage.estimated_cost_usd.toFixed(4)} · {incident.llm_usage.calls}{" "}
+              LLM calls · {incident.llm_usage.total_tokens.toLocaleString()} tokens
+            </p>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -323,12 +330,15 @@ export function IncidentDetail({ incidentId }: IncidentDetailProps) {
                     incident.worker_runs.map((run) => {
                       const meta = sourceMeta(run.worker);
                       return (
-                        <tr key={run.id}>
+                        <tr key={run.id} className="align-top">
                           <td className="px-3 py-2">
                             <span className="inline-flex items-center gap-2">
                               <span className={cn("size-1.5 rounded-full", meta.dot)} />
                               {run.worker}
                             </span>
+                            <div className="mt-2 max-w-md">
+                              <AgentReasoningPanel run={run} />
+                            </div>
                           </td>
                           <td
                             className={cn(

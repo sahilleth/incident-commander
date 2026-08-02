@@ -21,6 +21,13 @@ export type BackendIncident = {
   hypotheses?: BackendHypothesis[];
   worker_runs?: BackendWorkerRun[];
   approvals_pending?: BackendPendingApproval[];
+  llm_usage?: {
+    calls: number;
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    estimated_cost_usd: number;
+  };
 };
 
 type BackendTimelineEvent = {
@@ -57,6 +64,13 @@ type BackendWorkerRun = {
   error?: string | null;
   started_at?: string | null;
   finished_at?: string | null;
+  steps?: Array<{
+    iteration: number;
+    thought?: string;
+    action?: string | null;
+    action_input?: Record<string, unknown>;
+    observation?: string;
+  }>;
 };
 
 type BackendPendingApproval = {
@@ -130,6 +144,8 @@ function mapWorkerRuns(
       ...(started ? { started_at: started } : {}),
       duration_ms,
       ...(findings > 0 ? { findings } : {}),
+      ...(run.summary ? { summary: run.summary } : {}),
+      ...(run.steps && run.steps.length > 0 ? { steps: run.steps } : {}),
     };
   });
 }
@@ -163,5 +179,6 @@ export function mapBackendIncident(raw: BackendIncident): Incident {
     hypotheses: mapHypotheses(raw.hypotheses, timeline),
     worker_runs: mapWorkerRuns(raw.worker_runs, timeline),
     approvals_pending: mapApprovals(raw.approvals_pending),
+    ...(raw.llm_usage && raw.llm_usage.calls > 0 ? { llm_usage: raw.llm_usage } : {}),
   };
 }

@@ -55,6 +55,10 @@ class Settings(BaseSettings):
 
     deploy_lookback_minutes: int = 60
 
+    # LLM cost estimation (USD per 1K tokens; 0 = use built-in model table)
+    llm_input_price_per_1k: float = 0.0
+    llm_output_price_per_1k: float = 0.0
+
     def llm_uses_local_ollama(self) -> bool:
         if self.llm_provider == "ollama":
             return True

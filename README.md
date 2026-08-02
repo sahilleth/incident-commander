@@ -105,6 +105,8 @@ flowchart TD
 
 **Service name = Deployment name.** Workers resolve pods and ReplicaSets from the deployment's label selector.
 
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for agent design: two-phase investigation, LLM-first deploy correlator, ReAct traces, critique pass, and per-incident LLM cost tracking.
+
 ---
 
 ## Quick start (pip)
@@ -610,6 +612,12 @@ tests/
 - [x] Postmortem Markdown export
 - [x] Live scenarios (imagepull, OOM, crashloop-runtime)
 - [x] Scale runbook (`kubectl scale`)
+- [x] LLM-first deploy correlator (agent chooses tool order)
+- [x] Native LLM tool calling (ReAct + synthesizer)
+- [x] Agent reasoning trace in Web UI
+- [x] Cross-worker context (deploy timestamp → log window)
+- [x] Hypothesis critique / reflection pass
+- [x] Per-investigation LLM token & cost tracking
 - [ ] Postmortem PDF export
 - [ ] Helm chart for in-cluster deployment
 - [ ] API authentication

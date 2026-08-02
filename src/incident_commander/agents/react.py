@@ -7,6 +7,7 @@ from typing import Any
 
 from incident_commander.config import Settings
 from incident_commander.llm.llm_client import LLMClientPool
+from incident_commander.llm.usage import LLMUsageAccumulator
 
 
 ToolHandler = Callable[[dict[str, Any]], Awaitable[Any]]
@@ -50,10 +51,16 @@ class DeterministicStep:
 
 
 class ReActLoop:
-    def __init__(self, settings: Settings, worker_name: str) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        worker_name: str,
+        usage_accumulator: LLMUsageAccumulator | None = None,
+    ) -> None:
         self.settings = settings
         self.worker_name = worker_name
-        self._pool = LLMClientPool(settings)
+        self._usage = usage_accumulator
+        self._pool = LLMClientPool(settings, usage_accumulator=usage_accumulator)
 
     async def run_deterministic(
         self,
@@ -131,18 +138,28 @@ class ReActLoop:
         tools_called: list[str] = []
         records: list[ReActStepRecord] = []
         history_lines: list[str] = []
+        tool_specs = _openai_tool_specs(tools)
 
         for iteration in range(1, limit + 1):
             prompt = self._build_prompt(goal, tools, context, history_lines)
             try:
                 response = await self._pool.chat_completion(
                     model=self.settings.resolved_llm_model(),
-                    messages=[{"role": "user", "content": prompt}],
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                f"You are worker agent \"{self.worker_name}\" using a ReAct loop. "
+                                "Call tools to gather evidence. When you have enough information, "
+                                "respond with plain text (no tool call) summarizing findings."
+                            ),
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
                     temperature=0.1,
-                    response_format={"type": "json_object"},
+                    tools=tool_specs,
                 )
-                raw = response.choices[0].message.content or "{}"
-                decision = json.loads(raw)
+                message = response.choices[0].message
             except Exception as exc:
                 return ReActResult(
                     summary="LLM ReAct failed",
@@ -153,37 +170,45 @@ class ReActLoop:
                     error=str(exc),
                 )
 
-            thought = str(decision.get("thought", ""))
-            finished = bool(decision.get("finished", False))
-            summary = str(decision.get("summary", ""))
-            action = decision.get("action")
-            action_input = decision.get("action_input") or {}
+            tool_calls = getattr(message, "tool_calls", None) or []
 
-            if finished:
+            if not tool_calls:
+                summary = (message.content or "").strip() or "Investigation complete"
                 records.append(
                     ReActStepRecord(
                         iteration=iteration,
-                        thought=thought,
+                        thought="LLM finished without further tool calls",
                         action=None,
                         action_input={},
-                        observation=summary or "finished",
+                        observation=summary,
                     )
                 )
                 return ReActResult(
-                    summary=summary or "Investigation complete",
+                    summary=summary,
                     iterations=iteration,
                     tools_called=tools_called,
                     steps=records,
+                    finished=True,
                 )
 
-            if not action or action not in tool_map:
+            call = tool_calls[0]
+            action = call.function.name
+            try:
+                action_input = json.loads(call.function.arguments or "{}")
+            except json.JSONDecodeError:
+                action_input = {}
+
+            thought = f"LLM selected tool {action}"
+
+            if action not in tool_map:
+                obs_text = "Invalid or missing action; stopping loop"
                 records.append(
                     ReActStepRecord(
                         iteration=iteration,
                         thought=thought,
-                        action=str(action),
+                        action=action,
                         action_input=action_input,
-                        observation="Invalid or missing action; stopping loop",
+                        observation=obs_text,
                     )
                 )
                 break
@@ -205,7 +230,7 @@ class ReActLoop:
                 )
             )
             history_lines.append(
-                f"Iter {iteration}: thought={thought} action={action} -> {obs_text[:300]}"
+                f"Iter {iteration}: action={action} -> {obs_text[:300]}"
             )
 
         return ReActResult(
@@ -232,31 +257,33 @@ class ReActLoop:
             for t in tools
         ]
         history_text = "\n".join(history) if history else "None"
-        return f"""You are worker agent "{self.worker_name}" using a ReAct loop (Reason + Act).
-
-Goal: {goal}
+        return f"""Goal: {goal}
 
 Context:
 {json.dumps(context, default=str)}
 
-Available tools:
+Available tools (also registered for function calling):
 {json.dumps(tool_specs)}
 
 Previous steps:
 {history_text}
 
-Respond with JSON only:
-{{
-  "thought": "reasoning for next step",
-  "action": "tool_name or null if done",
-  "action_input": {{}},
-  "finished": false,
-  "summary": "final summary when finished"
-}}
-
-When you have enough information, set finished=true, action=null, and provide summary.
-Use at most one tool per iteration. Prefer gathering evidence before finishing.
+Call one tool per turn when more evidence is needed. When done, reply with plain text only.
 """
+
+
+def _openai_tool_specs(tools: list[ReActTool]) -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": t.name,
+                "description": t.description,
+                "parameters": t.parameters or {"type": "object", "properties": {}},
+            },
+        }
+        for t in tools
+    ]
 
 
 def _format_observation(observation: Any) -> str:

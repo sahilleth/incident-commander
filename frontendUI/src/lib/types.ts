@@ -32,6 +32,22 @@ export interface Hypothesis {
   evidence?: string[];
 }
 
+export interface ReActStep {
+  iteration: number;
+  thought?: string;
+  action?: string | null;
+  action_input?: Record<string, unknown>;
+  observation?: string;
+}
+
+export interface LLMUsage {
+  calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+}
+
 export interface WorkerRun {
   id: string;
   worker: string;
@@ -39,6 +55,8 @@ export interface WorkerRun {
   started_at?: string;
   duration_ms?: number;
   findings?: number;
+  summary?: string;
+  steps?: ReActStep[];
 }
 
 export interface PendingApproval {
@@ -65,6 +83,7 @@ export interface Incident {
   hypotheses: Hypothesis[];
   worker_runs: WorkerRun[];
   approvals_pending: PendingApproval[];
+  llm_usage?: LLMUsage;
 }
 
 export interface CreateIncidentInput {

@@ -11,6 +11,7 @@ def heuristic_settings(tmp_path) -> Settings:
     return Settings(
         incident_db_path=tmp_path / "test.db",
         groq_api_key="",
+        groq_api_key_fallback="",
         verify_max_attempts=1,
         verify_interval_seconds=0,
     )

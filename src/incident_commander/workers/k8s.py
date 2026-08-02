@@ -1,14 +1,18 @@
 """Kubernetes infrastructure worker with ReAct loop."""
 
+from typing import Any
+
 from incident_commander.agents.react import DeterministicStep, ReActTool
-from incident_commander.models.incident import TimelineEvent, WorkerResult
+from incident_commander.models.incident import Incident, TimelineEvent, WorkerResult
 from incident_commander.workers.base import BaseWorker
 
 
 class K8sWorker(BaseWorker):
     name = "k8s_worker"
 
-    async def run(self, incident) -> WorkerResult:
+    async def run(
+        self, incident: Incident, context: dict[str, Any] | None = None
+    ) -> WorkerResult:
         pods: list = []
         warnings: list = []
         since = self._since(incident)

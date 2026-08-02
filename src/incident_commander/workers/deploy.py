@@ -1,14 +1,18 @@
 """Deploy / change correlator worker with ReAct loop."""
 
+from typing import Any
+
 from incident_commander.agents.react import DeterministicStep, ReActTool
-from incident_commander.models.incident import TimelineEvent, WorkerResult
+from incident_commander.models.incident import Incident, TimelineEvent, WorkerResult
 from incident_commander.workers.base import BaseWorker
 
 
 class DeployCorrelatorWorker(BaseWorker):
     name = "deploy_correlator"
 
-    async def run(self, incident) -> WorkerResult:
+    async def run(
+        self, incident: Incident, context: dict[str, Any] | None = None
+    ) -> WorkerResult:
         deploys: list = []
         history_text = ""
 
@@ -38,7 +42,7 @@ class DeployCorrelatorWorker(BaseWorker):
             )
             return history_text[:200]
 
-        steps = [
+        deterministic_steps = [
             DeterministicStep(
                 thought="Check replica sets created since incident opened",
                 action_name="deploy.recent_deploys",
@@ -58,38 +62,69 @@ class DeployCorrelatorWorker(BaseWorker):
             ),
         ]
 
-        react_result = await self.react.run_deterministic(
-            goal=f"Find recent deploys for {incident.service}",
-            steps=steps,
-        )
+        llm_tools = [
+            ReActTool(
+                name="recent_deploys_since_incident",
+                description=(
+                    "List replica set deploy events since the incident opened. "
+                    "Start here — check recent ReplicaSets first."
+                ),
+                handler=lambda _: fetch_recent(),
+                parameters={"type": "object", "properties": {}},
+            ),
+            ReActTool(
+                name="recent_deploys_expanded",
+                description=(
+                    f"Expand the lookback window by {self.settings.deploy_lookback_minutes} "
+                    "minutes before the incident opened. Use only if recent_deploys_since_incident "
+                    "found nothing."
+                ),
+                handler=lambda _: fetch_expanded(),
+                parameters={"type": "object", "properties": {}},
+            ),
+            ReActTool(
+                name="rollout_history",
+                description=(
+                    "Fetch kubectl rollout history text as a last resort for revision context "
+                    "when deploy events are missing or ambiguous."
+                ),
+                handler=lambda _: fetch_history(),
+                parameters={"type": "object", "properties": {}},
+            ),
+        ]
 
-        if self.settings.llm_is_configured() and not deploys:
-            llm_result = await self.react.run_llm(
+        llm_context = {
+            "service": incident.service,
+            "namespace": incident.namespace,
+            "incident_opened_at": since_incident.isoformat(),
+            "deploy_lookback_minutes": self.settings.deploy_lookback_minutes,
+        }
+
+        if self.settings.llm_is_configured():
+            react_result = await self.react.run_llm(
                 goal=f"Find deploy changes for {incident.service}",
-                tools=[
-                    ReActTool(
-                        name="recent_deploys",
-                        description="List replica set deploy events since timestamp",
-                        handler=lambda _: fetch_expanded(),
-                        parameters={"type": "object", "properties": {}},
-                    ),
-                    ReActTool(
-                        name="rollout_history",
-                        description="kubectl rollout history text",
-                        handler=lambda _: fetch_history(),
-                        parameters={"type": "object", "properties": {}},
-                    ),
-                ],
-                context={
-                    "service": incident.service,
-                    "namespace": incident.namespace,
-                },
+                tools=llm_tools,
+                context=llm_context,
                 max_iterations=3,
             )
-            react_result.tools_called.extend(llm_result.tools_called)
-            react_result.iterations += llm_result.iterations
-            if llm_result.summary:
-                react_result.summary = llm_result.summary
+            if not react_result.finished or react_result.error:
+                fallback = await self.react.run_deterministic(
+                    goal=f"Find recent deploys for {incident.service}",
+                    steps=deterministic_steps,
+                )
+                react_result.tools_called.extend(fallback.tools_called)
+                react_result.iterations += fallback.iterations
+                react_result.steps.extend(fallback.steps)
+                if fallback.summary:
+                    react_result.summary = fallback.summary
+                if fallback.finished and not react_result.error:
+                    react_result.finished = True
+                    react_result.error = None
+        else:
+            react_result = await self.react.run_deterministic(
+                goal=f"Find recent deploys for {incident.service}",
+                steps=deterministic_steps,
+            )
 
         events: list[TimelineEvent] = []
         for i, d in enumerate(deploys):

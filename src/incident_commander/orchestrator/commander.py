@@ -3,9 +3,11 @@
 import asyncio
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from incident_commander.config import Settings
 from incident_commander.llm.synthesizer import HypothesisSynthesizer
+from incident_commander.llm.usage import LLMUsageAccumulator
 from incident_commander.models.incident import (
     Incident,
     IncidentStatus,
@@ -75,9 +77,10 @@ class IncidentCommander:
             raise ValueError(f"Incident {incident_id} not found")
 
         incident.status = IncidentStatus.INVESTIGATING
-        workers = [w(self.clients, self.settings) for w in self.DEFAULT_WORKERS]
+        usage = LLMUsageAccumulator(self.settings)
+        self.synthesizer = HypothesisSynthesizer(self.settings, usage_accumulator=usage)
 
-        async def run_worker(worker):
+        async def run_worker(worker, context: dict[str, Any] | None = None):
             run = WorkerRun(
                 worker=worker.name,
                 status="running",
@@ -86,7 +89,7 @@ class IncidentCommander:
             incident.worker_runs.append(run)
             try:
                 result = await asyncio.wait_for(
-                    worker.run(incident),
+                    worker.run(incident, context=context),
                     timeout=self.settings.worker_timeout_seconds,
                 )
                 for event in result.timeline_events:
@@ -96,6 +99,7 @@ class IncidentCommander:
                 run.tools_called = result.tools_called
                 run.summary = result.summary
                 run.error = result.error
+                run.steps = result.steps
             except asyncio.TimeoutError:
                 run.status = "timeout"
                 run.error = "Worker timed out"
@@ -105,14 +109,67 @@ class IncidentCommander:
             run.finished_at = datetime.now(timezone.utc)
             return run
 
-        await asyncio.gather(*(run_worker(w) for w in workers))
+        deploy_worker = DeployCorrelatorWorker(
+            self.clients, self.settings, usage_accumulator=usage
+        )
+        await run_worker(deploy_worker)
+
+        deploy_at = self._latest_deploy_timestamp(incident)
+        phase2_context: dict[str, Any] = {"deploy_at": deploy_at}
+
+        phase2_workers = [
+            LogsWorker(self.clients, self.settings, usage_accumulator=usage),
+            K8sWorker(self.clients, self.settings, usage_accumulator=usage),
+            MetricsWorker(self.clients, self.settings, usage_accumulator=usage),
+        ]
+        await asyncio.gather(*(run_worker(w, phase2_context) for w in phase2_workers))
 
         incident.hypotheses = await self.synthesizer.synthesize(incident)
+        await self._apply_critique(incident)
         incident.approvals_pending = self._queue_approvals(incident)
+        incident.llm_usage = usage.snapshot()
         incident.summary = self._build_summary(incident)
 
         await self.store.save(incident)
         return incident
+
+    def _latest_deploy_timestamp(self, incident: Incident) -> datetime | None:
+        deploy_events = [
+            e
+            for e in incident.timeline
+            if e.source == "deploy_correlator" and e.metadata.get("revision")
+        ]
+        if not deploy_events:
+            return None
+        return max(deploy_events, key=lambda e: e.at).at
+
+    async def _apply_critique(self, incident: Incident) -> None:
+        if not incident.hypotheses:
+            return
+        top = incident.hypotheses[0]
+        if top.confidence < 0.55:
+            return
+
+        critique = await self.synthesizer.critique(incident, top)
+        if critique is None:
+            return
+
+        top.confidence = max(0.0, min(1.0, top.confidence + critique.confidence_adjustment))
+        incident.add_timeline_event(
+            event_id=f"{incident.incident_id}-critique-{top.id}",
+            at=datetime.now(timezone.utc),
+            source="critique_agent",
+            event=(
+                f"Critique of {top.id}: supported={critique.supported}; "
+                f"adjustment={critique.confidence_adjustment:+.2f}. "
+                f"{critique.reasoning}"
+            ),
+            confidence="medium",
+            metadata={
+                "supported": critique.supported,
+                "confidence_adjustment": critique.confidence_adjustment,
+            },
+        )
 
     def _queue_approvals(self, incident: Incident) -> list[PendingApproval]:
         pending: list[PendingApproval] = []
