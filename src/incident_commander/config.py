@@ -3,7 +3,15 @@
 from pathlib import Path
 from typing import Literal
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEFAULT_CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
 
 
 class Settings(BaseSettings):
@@ -11,6 +19,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     # LLM — Groq (cloud) or Ollama / any OpenAI-compatible API
@@ -58,6 +67,42 @@ class Settings(BaseSettings):
     # LLM cost estimation (USD per 1K tokens; 0 = use built-in model table)
     llm_input_price_per_1k: float = 0.0
     llm_output_price_per_1k: float = 0.0
+
+    # API authentication (off when unset — safe default for local dev)
+    api_auth_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "INCIDENT_COMMANDER_API_TOKEN",
+            "API_AUTH_TOKEN",
+        ),
+    )
+    alertmanager_webhook_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "INCIDENT_COMMANDER_ALERTMANAGER_WEBHOOK_TOKEN",
+            "ALERTMANAGER_WEBHOOK_TOKEN",
+        ),
+    )
+    alertmanager_webhook_header: str = Field(
+        default="X-Webhook-Token",
+        validation_alias=AliasChoices(
+            "INCIDENT_COMMANDER_ALERTMANAGER_WEBHOOK_HEADER",
+            "ALERTMANAGER_WEBHOOK_HEADER",
+        ),
+    )
+    cors_allowed_origins: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "INCIDENT_COMMANDER_CORS_ALLOWED_ORIGINS",
+            "CORS_ALLOWED_ORIGINS",
+        ),
+    )
+
+    def resolved_cors_origins(self) -> list[str]:
+        raw = self.cors_allowed_origins.strip()
+        if not raw:
+            return list(DEFAULT_CORS_ORIGINS)
+        return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
     def llm_uses_local_ollama(self) -> bool:
         if self.llm_provider == "ollama":

@@ -25,11 +25,25 @@ export function getApiUrl(): string {
 /** Display label for connection status (header tooltip). */
 export const API_URL = getApiUrl();
 
+function authHeaders(): Record<string, string> {
+  const token =
+    (import.meta.env["VITE_API_TOKEN"] as string | undefined)?.trim() ||
+    (typeof process !== "undefined"
+      ? (process.env["VITE_API_TOKEN"] as string | undefined)?.trim()
+      : undefined);
+  if (!token) return {};
+  return { Authorization: `Bearer ${token}` };
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const base = getApiUrl();
   const res = await fetch(`${base}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+      ...(init?.headers ?? {}),
+    },
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");

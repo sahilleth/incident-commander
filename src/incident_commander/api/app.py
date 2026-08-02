@@ -1,19 +1,23 @@
 """FastAPI application."""
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
 
 from incident_commander.api.alertmanager import parse_alertmanager_payload
+from incident_commander.api.auth import require_auth, require_webhook_auth
 from incident_commander.config import get_settings
 from incident_commander.export.postmortem import export_postmortem_markdown
 from incident_commander.orchestrator.commander import IncidentCommander
 from incident_commander.state.store import IncidentStore
+
+logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -60,6 +64,12 @@ def _wants_html(request: Request) -> bool:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    if settings.api_auth_token and not settings.cors_allowed_origins.strip():
+        logger.warning(
+            "INCIDENT_COMMANDER_API_TOKEN is set but CORS_ALLOWED_ORIGINS is empty — "
+            "using localhost dev origins. Set INCIDENT_COMMANDER_CORS_ALLOWED_ORIGINS "
+            "for production deployments."
+        )
     store = IncidentStore(settings.incident_db_path)
     await store.init()
     app.state.settings = settings
@@ -67,6 +77,8 @@ async def lifespan(app: FastAPI):
     app.state.commander = IncidentCommander(settings, store)
     yield
 
+
+_bootstrap_settings = get_settings()
 
 app = FastAPI(
     title="Incident Commander",
@@ -77,18 +89,14 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=_bootstrap_settings.resolved_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 api = APIRouter()
+protected = APIRouter(dependencies=[Depends(require_auth)])
 
 
 @api.get("/health")
@@ -96,7 +104,7 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@api.post("/incidents")
+@protected.post("/incidents")
 async def create_incident(body: OpenIncidentRequest) -> dict[str, Any]:
     commander: IncidentCommander = app.state.commander
     incident = await commander.open_incident(
@@ -109,7 +117,7 @@ async def create_incident(body: OpenIncidentRequest) -> dict[str, Any]:
     return incident.model_dump(mode="json")
 
 
-@api.get("/incidents/{incident_id}")
+@protected.get("/incidents/{incident_id}")
 async def get_incident(incident_id: str, request: Request) -> Any:
     if _wants_html(request) and _frontend_index() is not None:
         return FileResponse(_frontend_index())
@@ -121,14 +129,14 @@ async def get_incident(incident_id: str, request: Request) -> Any:
     return incident.model_dump(mode="json")
 
 
-@api.get("/incidents")
+@protected.get("/incidents")
 async def list_incidents(limit: int = 100) -> list[dict[str, Any]]:
     store: IncidentStore = app.state.store
     incidents = await store.list_recent(limit=limit)
     return [i.model_dump(mode="json") for i in incidents]
 
 
-@api.get("/incidents/{incident_id}/postmortem.md")
+@protected.get("/incidents/{incident_id}/postmortem.md")
 async def get_postmortem(incident_id: str) -> PlainTextResponse:
     store: IncidentStore = app.state.store
     incident = await store.get(incident_id)
@@ -140,7 +148,7 @@ async def get_postmortem(incident_id: str) -> PlainTextResponse:
     )
 
 
-@api.post("/incidents/{incident_id}/investigate")
+@protected.post("/incidents/{incident_id}/investigate")
 async def re_investigate(incident_id: str) -> dict[str, Any]:
     commander: IncidentCommander = app.state.commander
     try:
@@ -152,7 +160,7 @@ async def re_investigate(incident_id: str) -> dict[str, Any]:
     return incident.model_dump(mode="json")
 
 
-@api.post("/incidents/{incident_id}/approve")
+@protected.post("/incidents/{incident_id}/approve")
 async def approve(incident_id: str, body: ApproveRequest) -> dict[str, Any]:
     commander: IncidentCommander = app.state.commander
     try:
@@ -164,14 +172,19 @@ async def approve(incident_id: str, body: ApproveRequest) -> dict[str, Any]:
     return incident.model_dump(mode="json")
 
 
+api.include_router(protected)
 app.include_router(api, prefix="/api")
 # Backward-compatible root paths for scripts, curl examples, and Alertmanager.
 app.include_router(api)
 
 
-@app.post("/webhooks/alertmanager")
+@app.post("/webhooks/alertmanager", dependencies=[Depends(require_webhook_auth)])
 async def alertmanager_webhook(body: dict[str, Any]) -> dict[str, Any]:
     """Receive Prometheus Alertmanager notifications and open incidents."""
+    alerts = body.get("alerts")
+    if alerts is not None and not isinstance(alerts, list):
+        raise HTTPException(status_code=400, detail="alerts must be a list")
+
     commander: IncidentCommander = app.state.commander
     parsed = parse_alertmanager_payload(body)
 

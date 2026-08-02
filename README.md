@@ -439,7 +439,7 @@ receivers:
 
 Labels `deployment`, `service`, or `app` on alerts map to the incident service name.
 
-> The API has no authentication in v0.2.0. Do not expose it on untrusted networks.
+When exposing the API beyond localhost, set `INCIDENT_COMMANDER_API_TOKEN` (see Configuration). Unauthenticated requests receive `401` with a JSON error body.
 
 ---
 
@@ -491,6 +491,27 @@ incident-commander doctor
 | `PROM_REQUEST_RATE_QUERY` | pod count query | Override for RPS-style metrics |
 
 Default Prom queries use **kube-state-metrics**. If your app exports `http_requests_total`, override the `PROM_*_QUERY` templates in `.env`.
+
+### API authentication
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `INCIDENT_COMMANDER_API_TOKEN` | unset (auth off) | Bearer token for `/api/*` endpoints (except `/health`) |
+| `INCIDENT_COMMANDER_ALERTMANAGER_WEBHOOK_TOKEN` | unset | Static header token for `POST /webhooks/alertmanager` |
+| `INCIDENT_COMMANDER_ALERTMANAGER_WEBHOOK_HEADER` | `X-Webhook-Token` | Header name Alertmanager sends for webhook auth |
+| `INCIDENT_COMMANDER_CORS_ALLOWED_ORIGINS` | localhost dev origins | Comma-separated allowed browser origins when auth is enabled |
+
+When `INCIDENT_COMMANDER_API_TOKEN` is set, send `Authorization: Bearer <token>` on all API calls except health checks. The React UI reads the same token from `VITE_API_TOKEN` in `frontendUI/.env`.
+
+Alertmanager webhook example:
+
+```yaml
+webhook_configs:
+  - url: http://incident-commander:8080/webhooks/alertmanager
+    http_config:
+      headers:
+        X-Webhook-Token: your-webhook-secret
+```
 
 ### Orchestrator
 
@@ -620,7 +641,7 @@ tests/
 - [x] Per-investigation LLM token & cost tracking
 - [ ] Postmortem PDF export
 - [ ] Helm chart for in-cluster deployment
-- [ ] API authentication
+- [x] API authentication (bearer token + webhook header)
 
 ---
 
